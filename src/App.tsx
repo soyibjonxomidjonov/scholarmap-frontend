@@ -743,6 +743,57 @@ const MOCK_UNIVERSITIES: University[] = [
   { id: '40', name: 'King\'s College London', country: 'Buyuk Britaniya', grantType: 'Desmond Tutu', amount: '£1,000', deadline: '2026-03-31', openingDate: '2026-01-01', link: 'https://www.kcl.ac.uk', photo: 'https://images.unsplash.com/photo-1563200022-77761805741f?auto=format&fit=crop&q=80&w=800&h=600' },
 ];
 
+// --- Country name normalizer (API inglizcha, UI O'zbekcha) ---
+const COUNTRY_MAP: Record<string, string> = {
+  'turkey': 'Turkiya', 'türkiye': 'Turkiya', 'turkiye': 'Turkiya',
+  'usa': 'AQSH', 'us': 'AQSH', 'united states': 'AQSH', 'america': 'AQSH',
+  'uk': 'Buyuk Britaniya', 'united kingdom': 'Buyuk Britaniya', 'england': 'Buyuk Britaniya', 'great britain': 'Buyuk Britaniya',
+  'germany': 'Germaniya', 'deutschland': 'Germaniya',
+  'canada': 'Kanada',
+  'australia': 'Avstraliya',
+  'japan': 'Yaponiya',
+  'south korea': 'Janubiy Koreya', 'korea': 'Janubiy Koreya',
+  'china': 'Xitoy',
+  'france': 'Fransiya',
+  'italy': 'Italiya',
+  'spain': 'Ispaniya',
+  'netherlands': 'Niderlandiya', 'holland': 'Niderlandiya',
+  'sweden': 'Shvetsiya',
+  'switzerland': 'Shveytsariya',
+  'norway': 'Norvegiya',
+  'denmark': 'Daniya',
+  'finland': 'Finlandiya',
+  'belgium': 'Belgiya',
+  'austria': 'Avstriya',
+  'ireland': 'Irlandiya',
+  'new zealand': 'Yangi Zelandiya',
+  'singapore': 'Singapur',
+  'malaysia': 'Malayziya',
+  'uae': 'BAA', 'united arab emirates': 'BAA',
+  'saudi arabia': 'Saudiya Arabistoni',
+  'qatar': 'Qatar',
+  'poland': 'Polsha',
+  'czech republic': 'Chexiya', 'czechia': 'Chexiya',
+  'hungary': 'Vengriya',
+  'portugal': 'Portugaliya',
+  'greece': 'Gretsiya',
+  'brazil': 'Braziliya',
+  'mexico': 'Meksika',
+  'argentina': 'Argentina',
+  'chile': 'Chili',
+  'south africa': 'Janubiy Afrika',
+  'egypt': 'Misr',
+  'israel': 'Isroil',
+  'india': 'Hindiston',
+  'scotland': 'Shotlandiya',
+};
+
+function normalizeCountry(raw: string | undefined | null): string {
+  if (!raw) return '';
+  const lower = raw.trim().toLowerCase();
+  return COUNTRY_MAP[lower] || raw.trim();
+}
+
 // --- Components ---
 
 const SidebarItem = ({
@@ -898,17 +949,17 @@ export default function App() {
           data.results.forEach((u: any) => all.push({
             id: String(u.id),
             name: u.university_name,
-            country: u.state,
+            country: normalizeCountry(u.state),
             grantType: u.grant_name,
             amount: u.grand_amount,
             deadline: u.reception_end,
             openingDate: u.reception_start,
-            link: '',
-            photo: '',
+            link: u.link || '',
+            photo: u.photo || '',
           }));
         }
         url = data.next || null;
-        if (all.length > 200) break; // safety limit
+        if (all.length > 300) break; // safety limit
       }
       setApiUniversities(all);
       setIsLoadingUnis(false);
@@ -1093,11 +1144,57 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && (res.status === 200 || res.status === 201)) {
-        // Auto-login after register
-        setLoginEmail(regForm.email);
-        setLoginPassword(regForm.password);
+        // Auto-login after register — to'g'ridan to'g'ri kirish
         setShowRegister(false);
-        alert("Ro'yxatdan o'tdingiz! Kirish tugmasini bosing.");
+        setIsRegistering(false);
+        // Avtomatik login
+        try {
+          const loginRes = await fetch(`${API_BASE}/auth/token/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: regForm.email, password: regForm.password }),
+          });
+          const loginData = await loginRes.json();
+          if (loginRes.ok && loginData.access) {
+            localStorage.setItem('access_token', loginData.access);
+            localStorage.setItem('refresh_token', loginData.refresh || '');
+            // Get user info
+            let found: any = null;
+            try {
+              const emailRes = await fetch(`${API_BASE}/users/?email=${encodeURIComponent(regForm.email)}`, {
+                headers: { 'Authorization': `Bearer ${loginData.access}` },
+              });
+              const emailData = await emailRes.json();
+              found = emailData.results?.find((u: any) => u.email === regForm.email) || emailData.results?.[0];
+            } catch { }
+            if (found) {
+              setCurrentUserId(found.id);
+              const profileData = {
+                firstName: found.first_name || regForm.first_name || '',
+                lastName: found.last_name || regForm.last_name || '',
+                middleName: found.sharif || '',
+                phone: found.phone_number || regForm.phone_number || '',
+                email: found.email || regForm.email || '',
+                photo: found.image || '',
+                isPremium: false,
+                joinedDate: found.created_at ? found.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+                savedGrants: 0,
+                applications: 0,
+              };
+              setUserProfile(profileData);
+              setProfileForm(profileData);
+            }
+            setIsLoggedIn(true);
+          } else {
+            // Login xato bo'lsa login sahifasiga qayt
+            setLoginEmail(regForm.email);
+            setLoginPassword(regForm.password);
+          }
+        } catch {
+          setLoginEmail(regForm.email);
+          setLoginPassword(regForm.password);
+        }
+        return;
       } else {
         const errMsg = Object.values(data).flat().join(', ');
         setRegError(errMsg || "Xatolik yuz berdi");
@@ -1473,80 +1570,81 @@ export default function App() {
               "rounded-[2.5rem] border overflow-hidden transition-colors",
               isDarkMode ? "bg-slate-800 border-slate-700 shadow-2xl" : "bg-white border-slate-100 shadow-xl"
             )}>
-              <div className="h-40 bg-gradient-to-r from-brand-blue to-purple-600 relative">
-                <div className="absolute -bottom-16 left-1/2 -translate-x-1/2 md:left-12 md:translate-x-0 flex flex-col md:flex-row items-center gap-6">
-                  <div className="relative group">
-                    <div className={cn(
-                      "w-32 h-32 rounded-full p-1 shadow-2xl transition-colors",
-                      isDarkMode ? "bg-slate-800" : "bg-white"
-                    )}>
-                      <div className={cn(
-                        "w-full h-full rounded-full flex items-center justify-center overflow-hidden border transition-colors",
-                        isDarkMode ? "bg-slate-700 border-slate-600" : "bg-slate-100 border-slate-100"
-                      )}>
-                        {profileForm.photo ? (
-                          <img src={profileForm.photo} alt="Profile" className="w-full h-full object-cover" />
-                        ) : (
-                          <User className={cn("w-12 h-12", isDarkMode ? "text-slate-500" : "text-slate-300")} />
-                        )}
-                      </div>
-                    </div>
-                    <label className="absolute bottom-0 right-0 w-10 h-10 bg-brand-blue hover:bg-brand-blue/90 text-white rounded-full flex items-center justify-center cursor-pointer shadow-lg border-4 transition-colors" style={{ borderColor: isDarkMode ? '#1e293b' : '#ffffff' }}>
-                      <Camera className="w-5 h-5" />
-                      <input type="file" className="hidden" accept="image/*" onChange={handlePhotoChange} />
-                    </label>
-                  </div>
-                  <div className="mb-2 pb-1 text-center md:text-left">
-                    <h2 className="text-3xl font-black text-white tracking-tight drop-shadow-sm">
-                      {userProfile.lastName} {userProfile.firstName} {userProfile.middleName}
-                    </h2>
-                    <div className="flex items-center justify-center md:justify-start gap-2 mt-1">
-                      {userProfile.isPremium ? (
-                        <span className="px-3 py-1 bg-amber-400 text-amber-900 text-[10px] font-black rounded-full uppercase tracking-widest flex items-center gap-1.5 shadow-lg shadow-amber-400/20">
-                          <Crown className="w-3 h-3" /> {t.premiumPlan}
-                        </span>
-                      ) : (
-                        <span className="px-3 py-1 bg-slate-200 text-slate-600 text-[10px] font-black rounded-full uppercase tracking-widest">
-                          {t.freePlan}
-                        </span>
-                      )}
-                      <span className="text-white/80 text-xs font-medium">{t.joinedDate}: {userProfile.joinedDate}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="absolute top-4 right-8">
+              <div className="h-28 md:h-40 bg-gradient-to-r from-brand-blue to-purple-600 relative">
+                <div className="absolute top-3 right-4 md:top-4 md:right-8">
                   {!isEditingProfile ? (
                     <button
                       onClick={() => {
                         setProfileForm(userProfile);
                         setIsEditingProfile(true);
                       }}
-                      className="px-6 py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-bold rounded-xl transition-all flex items-center gap-2 border border-white/20"
+                      className="px-4 py-2 md:px-6 md:py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-bold rounded-xl transition-all flex items-center gap-2 border border-white/20 text-sm"
                     >
-                      <Edit2 className="w-4 h-4" /> {t.edit}
+                      <Edit2 className="w-3.5 h-3.5" /> {t.edit}
                     </button>
                   ) : (
-                    <div className="flex gap-3">
+                    <div className="flex gap-2">
                       <button
                         onClick={() => {
                           setIsEditingProfile(false);
                           setProfileForm(userProfile);
                         }}
-                        className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-all"
+                        className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-all text-sm"
                       >
                         {t.cancel}
                       </button>
                       <button
                         onClick={handleSaveProfile}
-                        className="px-6 py-2.5 bg-brand-blue hover:bg-brand-blue/90 text-white font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-brand-blue/20"
+                        className="px-4 py-2 bg-brand-blue hover:bg-brand-blue/90 text-white font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-brand-blue/20 text-sm"
                       >
-                        <Save className="w-4 h-4" /> {t.save}
+                        <Save className="w-3.5 h-3.5" /> {t.save}
                       </button>
                     </div>
                   )}
                 </div>
               </div>
-              <div className="pt-24 md:pt-20 pb-8 px-8">
+              {/* Profile photo + name - mobilda pastda, desktopda banner ichida */}
+              <div className="flex flex-col items-center md:flex-row md:items-end gap-4 px-6 md:px-10 -mt-16 md:-mt-12 pb-6 md:pb-8">
+                <div className="relative group shrink-0">
+                  <div className={cn(
+                    "w-28 h-28 md:w-32 md:h-32 rounded-full p-1 shadow-2xl transition-colors",
+                    isDarkMode ? "bg-slate-800" : "bg-white"
+                  )}>
+                    <div className={cn(
+                      "w-full h-full rounded-full flex items-center justify-center overflow-hidden border transition-colors",
+                      isDarkMode ? "bg-slate-700 border-slate-600" : "bg-slate-100 border-slate-100"
+                    )}>
+                      {profileForm.photo ? (
+                        <img src={profileForm.photo} alt="Profile" className="w-full h-full object-cover" />
+                      ) : (
+                        <User className={cn("w-12 h-12", isDarkMode ? "text-slate-500" : "text-slate-300")} />
+                      )}
+                    </div>
+                  </div>
+                  <label className="absolute bottom-0 right-0 w-9 h-9 bg-brand-blue hover:bg-brand-blue/90 text-white rounded-full flex items-center justify-center cursor-pointer shadow-lg border-4 transition-colors" style={{ borderColor: isDarkMode ? '#1e293b' : '#ffffff' }}>
+                    <Camera className="w-4 h-4" />
+                    <input type="file" className="hidden" accept="image/*" onChange={handlePhotoChange} />
+                  </label>
+                </div>
+                <div className="text-center md:text-left pb-1">
+                  <h2 className={cn("text-xl md:text-3xl font-black tracking-tight", isDarkMode ? "text-white" : "text-slate-800")}>
+                    {userProfile.lastName} {userProfile.firstName} {userProfile.middleName}
+                  </h2>
+                  <div className="flex items-center justify-center md:justify-start flex-wrap gap-2 mt-1">
+                    {userProfile.isPremium ? (
+                      <span className="px-3 py-1 bg-amber-400 text-amber-900 text-[10px] font-black rounded-full uppercase tracking-widest flex items-center gap-1.5 shadow-lg shadow-amber-400/20">
+                        <Crown className="w-3 h-3" /> {t.premiumPlan}
+                      </span>
+                    ) : (
+                      <span className={cn("px-3 py-1 text-[10px] font-black rounded-full uppercase tracking-widest", isDarkMode ? "bg-slate-700 text-slate-400" : "bg-slate-200 text-slate-600")}>
+                        {t.freePlan}
+                      </span>
+                    )}
+                    <span className={cn("text-xs font-medium", isDarkMode ? "text-slate-400" : "text-slate-500")}>{t.joinedDate}: {userProfile.joinedDate}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="pt-4 md:pt-6 pb-6 md:pb-8 px-4 md:px-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   {/* Form Card */}
                   <div className="space-y-6">
@@ -1813,22 +1911,27 @@ export default function App() {
                     if (e.key === 'Enter') {
                       setIsLoadingUnis(true);
                       const params = new URLSearchParams();
-                      if (uniSearchQuery) {
-                        params.append('university_name', uniSearchQuery);
-                        params.append('state', uniSearchQuery);
-                        params.append('search', uniSearchQuery);
+                      if (uniSearchQuery.trim()) {
+                        params.append('search', uniSearchQuery.trim());
                       }
                       if (searchLevel) params.append('level', searchLevel);
                       apiFetch(`/universiteties/?${params.toString()}`)
                         .then(r => r.json())
                         .then(data => {
                           if (data.results) {
-                            setApiUniversities(data.results.map((u: any) => ({
+                            const mapped = data.results.map((u: any) => ({
                               id: String(u.id), name: u.university_name, country: u.state,
                               grantType: u.grant_name, amount: u.grand_amount,
                               deadline: u.reception_end, openingDate: u.reception_start,
                               link: u.link || '', photo: u.photo || '',
-                            })));
+                            }));
+                            const sq = uniSearchQuery.trim().toLowerCase();
+                            const sfilt = sq ? mapped.filter((u: University) =>
+                              u.name?.toLowerCase().includes(sq) ||
+                              u.country?.toLowerCase().includes(sq) ||
+                              u.grantType?.toLowerCase().includes(sq)
+                            ) : mapped;
+                            setApiUniversities(sfilt.length > 0 ? sfilt : mapped);
                           }
                         })
                         .catch(() => { })
@@ -1855,23 +1958,26 @@ export default function App() {
               <button
                 onClick={() => {
                   setIsLoadingUnis(true);
-                  const params = new URLSearchParams();
-                  if (uniSearchQuery) {
-                    params.append('university_name', uniSearchQuery);
-                    params.append('state', uniSearchQuery);
-                    params.append('search', uniSearchQuery);
-                  }
-                  if (searchLevel) params.append('level', searchLevel);
-                  apiFetch(`/universiteties/?${params.toString()}`)
+                  const p2 = new URLSearchParams();
+                  if (uniSearchQuery.trim()) p2.append('search', uniSearchQuery.trim());
+                  if (searchLevel) p2.append('level', searchLevel);
+                  apiFetch(`/universiteties/?${p2.toString()}`)
                     .then(r => r.json())
                     .then(data => {
                       if (data.results) {
-                        setApiUniversities(data.results.map((u: any) => ({
-                          id: String(u.id), name: u.university_name, country: u.state,
+                        const m2 = data.results.map((u: any) => ({
+                          id: String(u.id), name: u.university_name, country: normalizeCountry(u.state),
                           grantType: u.grant_name, amount: u.grand_amount,
                           deadline: u.reception_end, openingDate: u.reception_start,
                           link: u.link || '', photo: u.photo || '',
-                        })));
+                        }));
+                        const sq2 = uniSearchQuery.trim().toLowerCase();
+                        const sf2 = sq2 ? m2.filter((u: University) =>
+                          u.name?.toLowerCase().includes(sq2) ||
+                          u.country?.toLowerCase().includes(sq2) ||
+                          u.grantType?.toLowerCase().includes(sq2)
+                        ) : m2;
+                        setApiUniversities(sf2.length > 0 ? sf2 : m2);
                       }
                     })
                     .catch(() => { })
@@ -1888,75 +1994,84 @@ export default function App() {
                 <div className="flex items-center justify-center py-20">
                   <Loader2 className="w-10 h-10 animate-spin text-brand-blue" />
                 </div>
-              ) : activeUniversities.map((uniRaw) => {
-                const uni = getTranslatedUni(uniRaw);
-                return (
-                  <div key={uni.id} className={cn(
-                    "p-6 rounded-3xl border shadow-sm hover:shadow-xl transition-all flex flex-col md:flex-row md:items-center justify-between gap-6 overflow-hidden relative group",
-                    isDarkMode ? "bg-slate-800/50 border-slate-700" : "bg-white border-slate-100"
-                  )}>
-                    <div className="flex items-center gap-5 relative z-10">
-                      <div className={cn(
-                        "w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-inner transition-colors overflow-hidden",
-                        isDarkMode ? "bg-slate-700" : "bg-blue-50"
-                      )}>
-                        <UniversityLogo name={uni.name} link={uni.link} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className={cn("text-lg font-bold tracking-tight", isDarkMode ? "text-white" : "text-slate-800")}>{uni.name}</h3>
+              ) : activeUniversities.filter(u => {
+                  const q = uniSearchQuery.trim().toLowerCase();
+                  return !q || u.name?.toLowerCase().includes(q) || u.country?.toLowerCase().includes(q) || u.grantType?.toLowerCase().includes(q);
+                }).length === 0 && uniSearchQuery.trim() ? (
+                <div className={cn("py-16 text-center rounded-3xl border", isDarkMode ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100")}>
+                  <Search className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                  <p className={cn("font-bold", isDarkMode ? "text-slate-400" : "text-slate-500")}>Natija topilmadi</p>
+                  <p className="text-xs text-slate-400 mt-1">Boshqa kalit so'z kiriting</p>
+                </div>
+              ) : activeUniversities.filter(u => {
+                  const q = uniSearchQuery.trim().toLowerCase();
+                  return !q || u.name?.toLowerCase().includes(q) || u.country?.toLowerCase().includes(q) || u.grantType?.toLowerCase().includes(q);
+                }).map((uniRaw) => {
+                  const uni = getTranslatedUni(uniRaw);
+                  return (
+                    <div key={uni.id} className={cn(
+                      "p-6 rounded-3xl border shadow-sm hover:shadow-xl transition-all flex flex-col md:flex-row md:items-center justify-between gap-6 overflow-hidden relative group",
+                      isDarkMode ? "bg-slate-800/50 border-slate-700" : "bg-white border-slate-100"
+                    )}>
+                      <div className="flex items-center gap-5 relative z-10">
+                        <div className={cn(
+                          "w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-inner transition-colors overflow-hidden",
+                          isDarkMode ? "bg-slate-700" : "bg-blue-50"
+                        )}>
+                          <UniversityLogo name={uni.name} link={uni.link} />
                         </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                          <span className={cn(
-                            "text-xs font-medium",
-                            isDarkMode ? "text-slate-400" : "text-slate-500"
-                          )}>
-                            {uni.country} • {uni.grantType}
-                          </span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className={cn("text-lg font-bold tracking-tight", isDarkMode ? "text-white" : "text-slate-800")}>{uni.name}</h3>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            <span className={cn("text-xs font-medium", isDarkMode ? "text-slate-400" : "text-slate-500")}>
+                              {uni.country} • {uni.grantType}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-8 relative z-10">
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">GRANT SUMMASI</p>
+                          <p className={cn("text-lg font-bold", isDarkMode ? "text-emerald-400" : "text-emerald-600")}>{uni.amount}</p>
+                        </div>
+                        <div className="text-right hidden md:block">
+                          <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">DEADLINE</p>
+                          <p className="text-lg font-bold text-red-500">{uni.deadline}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => {
+                              setEslatmaModal({ uni });
+                              setEslatmaDate(uni.deadline || '');
+                              setEslatmaType('gmail');
+                            }}
+                            className={cn(
+                              "p-2.5 rounded-xl transition-all",
+                              isDarkMode ? "bg-slate-700 text-slate-400 hover:text-white" : "bg-slate-50 text-slate-400 hover:text-brand-blue"
+                            )}>
+                            <Bell className="w-5 h-5" />
+                          </button>
+                          <a
+                            href={uni.link || '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={cn(
+                              "px-6 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-lg active:scale-[0.98]",
+                              isDarkMode
+                                ? "bg-slate-700 text-white hover:bg-slate-600 shadow-slate-900/20"
+                                : "bg-[#1a1c1e] text-white hover:bg-black shadow-slate-900/20"
+                            )}
+                          >
+                            Rasmiy sayt <ArrowRight className="w-4 h-4" />
+                          </a>
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-8 relative z-10">
-                      <div className="text-right">
-                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">GRANT SUMMASI</p>
-                        <p className={cn("text-lg font-bold", isDarkMode ? "text-emerald-400" : "text-emerald-600")}>{uni.amount}</p>
-                      </div>
-                      <div className="text-right hidden md:block">
-                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">DEADLINE</p>
-                        <p className="text-lg font-bold text-red-500">{uni.deadline}</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => {
-                            setEslatmaModal({ uni });
-                            setEslatmaDate(uni.deadline || '');
-                            setEslatmaType('gmail');
-                          }}
-                          className={cn(
-                            "p-2.5 rounded-xl transition-all",
-                            isDarkMode ? "bg-slate-700 text-slate-400 hover:text-white" : "bg-slate-50 text-slate-400 hover:text-brand-blue"
-                          )}>
-                          <Bell className="w-5 h-5" />
-                        </button>
-                        <a
-                          href={uni.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={cn(
-                            "px-6 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-lg active:scale-[0.98]",
-                            isDarkMode
-                              ? "bg-slate-700 text-white hover:bg-slate-600 shadow-slate-900/20"
-                              : "bg-[#1a1c1e] text-white hover:bg-black shadow-slate-900/20"
-                          )}
-                        >
-                          Rasmiy sayt <ArrowRight className="w-4 h-4" />
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </motion.div>
         );
@@ -2036,44 +2151,85 @@ export default function App() {
                   setIsLoadingUnis(true);
                   setSearchPageResults([]);
                   const params = new URLSearchParams();
-                  if (searchCountry) params.append('state', searchCountry);
-                  if (searchLevel && searchLevel !== t.educationLevel) params.append('level', searchLevel);
-                  if (selectedMajor) params.append('directions', selectedMajor);
-                  apiFetch(`/universiteties/?${params.toString()}`)
+                  // API ga faqat search parametri beramiz
+                  if (searchCountry) params.append('search', searchCountry);
+                  apiFetch(`/universiteties/?${params.toString()}&page_size=200`)
                     .then(r => r.json())
                     .then(async data => {
                       let all: University[] = (data.results || []).map((u: any) => ({
-                        id: String(u.id), name: u.university_name, country: u.state,
+                        id: String(u.id), name: u.university_name, country: normalizeCountry(u.state),
                         grantType: u.grant_name, amount: u.grand_amount,
                         deadline: u.reception_end, openingDate: u.reception_start,
                         link: u.link || '', photo: u.photo || '',
                       }));
+                      // Barcha sahifalarni yuklash
                       let nextUrl = data.next;
-                      while (nextUrl) {
+                      while (nextUrl && all.length < 500) {
                         const token = localStorage.getItem('access_token');
                         const r2 = await fetch(nextUrl, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
                         const d2 = await r2.json();
                         (d2.results || []).forEach((u: any) => all.push({
-                          id: String(u.id), name: u.university_name, country: u.state,
+                          id: String(u.id), name: u.university_name, country: normalizeCountry(u.state),
                           grantType: u.grant_name, amount: u.grand_amount,
                           deadline: u.reception_end, openingDate: u.reception_start,
                           link: u.link || '', photo: u.photo || '',
                         }));
                         nextUrl = d2.next;
-                        if (all.length > 500) break;
                       }
+
+                      // --- Client-side filtrlash (asosiy logika) ---
+                      let filtered = all;
+                      if (searchCountry) {
+                        const cq = searchCountry.toLowerCase();
+                        filtered = filtered.filter(u =>
+                          u.country?.toLowerCase().includes(cq) ||
+                          u.country?.toLowerCase() === cq
+                        );
+                      }
+                      if (selectedMajor) {
+                        const mq = selectedMajor.toLowerCase();
+                        filtered = filtered.filter(u =>
+                          u.grantType?.toLowerCase().includes(mq) ||
+                          u.name?.toLowerCase().includes(mq)
+                        );
+                      }
+
                       // Fallback to MOCK if API returned nothing
-                      if (all.length === 0) {
-                        all = MOCK_UNIVERSITIES.filter(u => {
-                          const cm = !searchCountry || u.country.toLowerCase().includes(searchCountry.toLowerCase());
-                          const mm = !selectedMajor || u.grantType?.toLowerCase().includes(selectedMajor.toLowerCase());
-                          return cm && mm;
-                        });
-                        if (all.length === 0) all = MOCK_UNIVERSITIES.slice(0, 10);
+                      if (filtered.length === 0 && all.length === 0) {
+                        let mockFiltered = MOCK_UNIVERSITIES;
+                        if (searchCountry) {
+                          const cq = searchCountry.toLowerCase();
+                          mockFiltered = mockFiltered.filter(u => u.country.toLowerCase().includes(cq));
+                        }
+                        if (selectedMajor) {
+                          const mq = selectedMajor.toLowerCase();
+                          mockFiltered = mockFiltered.filter(u =>
+                            u.grantType?.toLowerCase().includes(mq) ||
+                            u.name?.toLowerCase().includes(mq)
+                          );
+                        }
+                        filtered = mockFiltered.length > 0 ? mockFiltered : MOCK_UNIVERSITIES.slice(0, 10);
+                      } else if (filtered.length === 0 && all.length > 0) {
+                        // API topdi amma client filter 0 — Mock dan to'ldirish
+                        let mockFiltered = MOCK_UNIVERSITIES;
+                        if (searchCountry) {
+                          const cq = searchCountry.toLowerCase();
+                          mockFiltered = mockFiltered.filter(u => u.country.toLowerCase().includes(cq));
+                        }
+                        filtered = mockFiltered.length > 0 ? mockFiltered : all.slice(0, 10);
                       }
-                      setSearchPageResults(all);
+
+                      setSearchPageResults(filtered);
                     })
-                    .catch(() => { })
+                    .catch(() => {
+                      // Error bo'lsa Mock dan filtrlash
+                      let mockFiltered = MOCK_UNIVERSITIES;
+                      if (searchCountry) {
+                        const cq = searchCountry.toLowerCase();
+                        mockFiltered = mockFiltered.filter(u => u.country.toLowerCase().includes(cq));
+                      }
+                      setSearchPageResults(mockFiltered.length > 0 ? mockFiltered : MOCK_UNIVERSITIES.slice(0, 10));
+                    })
                     .finally(() => setIsLoadingUnis(false));
                 }}
                 className="w-full mt-10 bg-brand-blue text-white py-5 rounded-[1.5rem] font-black text-lg hover:bg-blue-700 shadow-2xl shadow-brand-blue/30 transition-all flex items-center justify-center gap-4 active:scale-[0.98]">
@@ -3264,14 +3420,15 @@ return (
           key="main"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="min-h-screen flex flex-col md:flex-row bg-slate-50"
+          className="min-h-screen flex flex-col md:flex-row"
+          style={{ background: isDarkMode ? '#0f172a' : '#f8fafc' }}
         >
-          {/* --- Sidebar --- */}
+          {/* --- Desktop Sidebar --- */}
           <aside className={cn(
-            "w-full md:w-72 border-r flex flex-col shrink-0 z-20 transition-colors",
+            "hidden md:flex w-72 border-r flex-col shrink-0 z-20 transition-colors h-screen sticky top-0",
             isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
           )}>
-            <div className="p-6">
+            <div className="p-6 overflow-y-auto flex-1">
               <div className="flex items-center gap-3 mb-8">
                 <div className="w-12 h-12 flex items-center justify-center">
                   <Logo className="w-10 h-10" />
@@ -3354,7 +3511,7 @@ return (
               </nav>
             </div>
 
-            <div className={cn("mt-auto p-6 border-t transition-colors", isDarkMode ? "border-slate-800" : "border-slate-100")}>
+            <div className={cn("p-6 border-t transition-colors shrink-0", isDarkMode ? "border-slate-800" : "border-slate-100")}>
               <div className={cn("p-4 rounded-2xl space-y-3", isDarkMode ? "bg-slate-800/50" : "bg-slate-50")}>
                 <div className="flex items-center gap-3 text-xs text-slate-500">
                   <MapPin className="w-4 h-4 text-brand-blue" />
@@ -3388,14 +3545,75 @@ return (
             </div>
           </aside>
 
+          {/* --- Mobile Top Header --- */}
+          <div className={cn(
+            "md:hidden flex items-center justify-between px-4 py-3 border-b shrink-0 sticky top-0 z-30",
+            isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+          )}>
+            <div className="flex items-center gap-2">
+              <Logo className="w-8 h-8" />
+              <span className={cn("font-black text-base tracking-tight", isDarkMode ? "text-white" : "text-slate-800")}>ScholarMap</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className={cn(
+                  "p-2 rounded-xl transition-all",
+                  isDarkMode ? "bg-slate-800 text-brand-blue" : "bg-slate-100 text-slate-500"
+                )}
+              >
+                {isDarkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+              </button>
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value as any)}
+                className={cn(
+                  "text-xs font-bold rounded-xl px-2 py-2 outline-none transition-colors appearance-none cursor-pointer",
+                  isDarkMode ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-700"
+                )}
+              >
+                <option value="uz">UZ</option>
+                <option value="en">EN</option>
+                <option value="ru">RU</option>
+              </select>
+              <button
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className={cn(
+                  "p-2 rounded-full transition-all relative",
+                  isDarkMode ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
+                )}
+              >
+                <Bell className="w-4 h-4" />
+                {notifications.filter(n => !n.isRead).length > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+                )}
+              </button>
+              <button
+                onClick={() => setActiveSection('profile')}
+                className={cn(
+                  "w-8 h-8 rounded-xl flex items-center justify-center overflow-hidden",
+                  isDarkMode ? "bg-slate-800" : "bg-slate-100"
+                )}
+              >
+                {userProfile.photo ? (
+                  <img src={userProfile.photo} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <span className={cn("text-[10px] font-bold", isDarkMode ? "text-slate-400" : "text-brand-blue")}>
+                    {userProfile.firstName.charAt(0)}{userProfile.lastName.charAt(0)}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
           {/* --- Main Content --- */}
           <main className={cn(
-            "flex-1 flex flex-col h-screen overflow-hidden transition-colors",
+            "flex-1 flex flex-col md:h-screen overflow-hidden transition-colors",
             isDarkMode ? "bg-slate-900" : "bg-slate-50"
           )}>
-            {/* Header Banner */}
+            {/* Header Banner - Desktop only */}
             <header className={cn(
-              "border-b px-8 py-4 flex items-center justify-between shrink-0 transition-colors",
+              "hidden md:flex border-b px-8 py-4 items-center justify-between shrink-0 transition-colors",
               isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
             )}>
               <div className="flex items-center gap-4">
@@ -3555,12 +3773,43 @@ return (
             </header>
 
             {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto p-8">
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
               <AnimatePresence mode="wait">
                 {renderSection()}
               </AnimatePresence>
             </div>
           </main>
+
+          {/* --- Mobile Bottom Navigation --- */}
+          <nav className={cn(
+            "md:hidden fixed bottom-0 left-0 right-0 z-30 border-t flex items-center justify-around py-2 px-1",
+            isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+          )}>
+            {[
+              { icon: Database, section: 'database' as const, label: t.dashboard.split(' ')[0] },
+              { icon: Search, section: 'search' as const, label: t.search.split(' ')[0] },
+              { icon: Calculator, section: 'eligibility' as const, label: language === 'uz' ? 'Baholash' : language === 'ru' ? 'Оценка' : 'Check' },
+              { icon: Calendar, section: 'deadlines' as const, label: language === 'uz' ? 'Muddatlar' : language === 'ru' ? 'Сроки' : 'Deadlines' },
+              { icon: Crown, section: 'premium' as const, label: 'Premium' },
+            ].map(({ icon: Icon, section, label }) => (
+              <button
+                key={section}
+                onClick={() => section === 'premium' ? setIsPremiumModalOpen(true) : setActiveSection(section)}
+                className={cn(
+                  "flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all min-w-0 flex-1",
+                  (activeSection === section || (section === 'premium' && isPremiumModalOpen))
+                    ? "text-brand-blue"
+                    : isDarkMode ? "text-slate-500" : "text-slate-400"
+                )}
+              >
+                <Icon className={cn(
+                  "w-5 h-5 shrink-0",
+                  (activeSection === section || (section === 'premium' && isPremiumModalOpen)) ? "text-brand-blue" : ""
+                )} />
+                <span className="text-[9px] font-bold truncate max-w-full">{label}</span>
+              </button>
+            ))}
+          </nav>
         </motion.div>
       )}
     </AnimatePresence>
